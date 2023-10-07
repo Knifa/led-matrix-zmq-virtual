@@ -6,19 +6,27 @@
 #include <getopt.h>
 #include <zmq.hpp>
 
-class Options {
+class Options
+{
 public:
-  enum class Args { endpoint = 1, width, height, scale, bpp };
+  enum class Args
+  {
+    endpoint = 1,
+    width,
+    height,
+    scale,
+    bpp
+  };
 
   std::string endpoint = "tcp://*:42024";
-  int width = 320;
-  int height = 192;
-  int scale = 4;
+  int width = 192;
+  int height = 320;
+  int scale = 2;
   int bpp = 32;
 
-  static Options from_args(int argc, char *argv[]) {
+  static Options from_args(int argc, char *argv[])
+  {
     Options server_options;
-
     static struct option long_opts[]{
         {"zmq-endpoint", optional_argument, nullptr,
          static_cast<int>(Options::Args::endpoint)},
@@ -35,8 +43,10 @@ public:
     int optCode;
     int optIndex;
     while ((optCode = getopt_long(argc, argv, "", long_opts, &optIndex)) !=
-           -1) {
-      switch (optCode) {
+           -1)
+    {
+      switch (optCode)
+      {
       case static_cast<int>(Options::Args::endpoint):
         server_options.endpoint = std::string(optarg);
         break;
@@ -63,14 +73,17 @@ public:
   }
 };
 
-int main(int argc, char *argv[]) {
+int main(int argc, char *argv[])
+{
   const auto options = Options::from_args(argc, argv);
 
-  const auto windowWidth = options.height * options.scale;
-  const auto windowHeight = options.width * options.scale;
+  const auto windowWidth = options.width * options.scale;
+  const auto windowHeight = options.height * options.scale;
 
-  const auto textureWidth = options.height;
-  const auto textureHeight = options.width;
+  const auto textureWidth = options.width;
+  const auto textureHeight = options.height;
+
+  const auto expectedMessageSize = textureWidth * textureHeight * options.bpp / 8;
 
   SDL_Init(SDL_INIT_VIDEO);
   auto *window =
@@ -85,38 +98,34 @@ int main(int argc, char *argv[]) {
   zmq::socket_t zmqSock(zmqCtx, zmq::socket_type::rep);
   zmqSock.bind(options.endpoint);
 
-  uint8_t rawPixels[options.width * options.height * options.bpp / 8];
-
   auto running = true;
-  while (running) {
+  while (running)
+  {
     SDL_Event event;
-    while (SDL_PollEvent(&event)) {
-      if (event.type == SDL_QUIT) {
+    while (SDL_PollEvent(&event))
+    {
+      if (event.type == SDL_QUIT)
+      {
         running = false;
       }
     }
 
-    zmqSock.recv(rawPixels,
-                 sizeof(rawPixels));
-    zmqSock.send(nullptr, 0);
+    zmq::message_t message;
+    zmqSock.recv(message);
+    if (message.size() != expectedMessageSize)
+    {
+      std::cerr << "Invalid message size: " << message.size() << ", expected: "
+                << expectedMessageSize << "\n";
+      continue;
+    }
+
+    zmqSock.send(zmq::const_buffer(), zmq::send_flags::dontwait);
 
     void *texturePixels;
     int texturePitch;
     SDL_LockTexture(texture, nullptr, &texturePixels, &texturePitch);
 
-    // Rotate -90 degrees.
-    for (auto y = 0; y < textureHeight; y++) {
-      for (auto x = 0; x < textureWidth; x++) {
-        const auto srcY = x;
-        const auto srcX = textureHeight - y - 1;
-
-        const auto srcOffset = (srcY * options.width + srcX) * options.bpp / 8;
-        const auto dstOffset = (y * textureWidth + x) * options.bpp / 8;
-
-        std::memcpy(static_cast<uint8_t *>(texturePixels) + dstOffset,
-                    rawPixels + srcOffset, options.bpp / 8);
-      }
-    }
+    std::memcpy(texturePixels, message.data(), message.size());
 
     SDL_UnlockTexture(texture);
     SDL_RenderCopy(renderer, texture, nullptr, nullptr);
