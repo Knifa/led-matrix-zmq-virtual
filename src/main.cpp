@@ -18,7 +18,7 @@ public:
     bpp
   };
 
-  std::string endpoint = "tcp://*:42024";
+  std::string endpoint = "ipc:///tmp/matryx.sock";
   int width = 192;
   int height = 320;
   int scale = 2;
